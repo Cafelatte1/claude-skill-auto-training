@@ -1,0 +1,420 @@
+# task_format.yaml
+# 목적:
+# - prepdata 버전 폴더(dataset/prepdata/{version})에서 task별 권장 데이터 구조를 표준화한다.
+# - loader는 되도록 "index file(train/valid.jsonl|parquet)"만 읽고, asset은 상대경로로 접근한다.
+# - common/은 전역 공유가 필요한 정보(카탈로그, 스키마, vocab, id mapping 등)를 담는다.
+
+meta:
+  version: "1.0"
+  base_dir_template: "dataset/prepdata/{version}"
+  required_dirs:
+    - "train/"
+    - "valid/"
+    - "common/"
+  required_files:
+    - "stats.json"
+  index_policy:
+    # train/valid 폴더 각각에 아래 둘 중 하나 이상 존재 권장
+    allow: ["jsonl", "parquet"]
+    preferred: "jsonl"
+    train_index_candidates: ["train.jsonl", "train.parquet"]
+    valid_index_candidates: ["valid.jsonl", "valid.parquet"]
+    path_convention:
+      # index 레코드 내 path는 "해당 split 폴더 기준 상대경로"
+      relative_to: "split_dir" # train/ or valid/
+
+common_concepts:
+  split_dirs:
+    train: "dataset/prepdata/{version}/train/"
+    valid: "dataset/prepdata/{version}/valid/"
+    common: "dataset/prepdata/{version}/common/"
+  record_fields:
+    required_minimum:
+      - id
+    recommended:
+      - task
+      - input_type
+      - created_at
+      - source
+      - meta
+  common_dir_candidates:
+    # 태스크에 따라 일부만 사용해도 됨
+    - "label_map.json"          # classification labels
+    - "vocab.json"              # tokenizer vocab / char vocab
+    - "schema.json"             # feature schema
+    - "id_mapping.json"         # user/item/id mapping
+    - "catalog.parquet"         # recommender item catalog
+    - "prompts.yaml"            # prompt templates
+    - "normalizer.json"         # normalization rules
+    - "feature_stats.json"      # global feature stats
+    - "retrieval_index/"        # optional retrieval artifacts (if any)
+
+supported_tasks:
+
+  # ---------------------------
+  # TEXT
+  # ---------------------------
+  text-generation:
+    description: "입력 텍스트(prompt)로부터 출력 텍스트(target)를 생성 (SFT/Instruction/QA/Chat 포함)"
+    split_layout:
+      mode: "index_only_or_files"
+      allowed_assets:
+        - "text/{id}.txt"     # optional
+        - "label/{id}.json"   # optional
+      required_index: true
+    index_schema:
+      required:
+        - id
+        - input
+        - target
+      optional:
+        - system
+        - history
+        - lang
+        - meta
+    examples:
+      dir_tree: |
+        train/
+          train.jsonl
+        valid/
+          valid.jsonl
+        common/
+          prompts.yaml
+      record_jsonl: |
+        {"id":0,"task":"text-generation","input":"요약해줘: ...","target":"요약 결과 ...","lang":"ko"}
+
+  text-classification:
+    description: "텍스트 입력 → 클래스/라벨 예측"
+    split_layout:
+      mode: "index_only_or_files"
+      required_index: true
+      allowed_assets: ["text/{id}.txt"]
+    index_schema:
+      required: [id, input, label]
+      optional: [label_id, lang, meta]
+    common_recommended: ["label_map.json"]
+    examples:
+      record_jsonl: |
+        {"id":3,"task":"text-classification","input":"이 영화 진짜 재밌다","label":"positive"}
+
+  token-classification:
+    description: "NER/slot tagging 등 토큰 단위 라벨링"
+    split_layout:
+      mode: "index_only"
+      required_index: true
+    index_schema:
+      required: [id, tokens, tags]
+      optional: [lang, meta]
+    common_recommended: ["label_map.json"]
+    examples:
+      record_jsonl: |
+        {"id":1,"task":"token-classification","tokens":["서울","에","갔다"],"tags":["B-LOC","O","O"]}
+
+  text-pair-ranking:
+    description: "query-document, query-pair 등 Ranking/Retrieval 학습 (pairwise/triplet/contrastive)"
+    split_layout:
+      mode: "index_only"
+      required_index: true
+    index_schema:
+      required: [id, query, positive, negative]
+      optional: [meta]
+    examples:
+      record_jsonl: |
+        {"id":10,"task":"text-pair-ranking","query":"환불 규정","positive":"환불은 7일 이내...","negative":"배송 조회는..."}
+
+  # ---------------------------
+  # IMAGE
+  # ---------------------------
+  image-classification:
+    description: "이미지 입력 → 클래스/라벨 예측"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, label]
+      optional: [width, height, meta]
+    common_recommended: ["label_map.json"]
+    examples:
+      dir_tree: |
+        train/
+          image/0.png
+          label/0.json
+          train.jsonl
+      record_jsonl: |
+        {"id":0,"task":"image-classification","image_path":"image/0.png","label":"cat","width":512,"height":512}
+
+  image-regression:
+    description: "이미지 입력 → 연속값(예: 품질 점수, 나이 추정)"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, target]
+      optional: [meta]
+    examples:
+      record_jsonl: |
+        {"id":2,"task":"image-regression","image_path":"image/2.png","target":0.83}
+
+  object-detection:
+    description: "이미지 입력 → bbox/label 리스트"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png", "label/{id}.json"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, label_path]
+      optional: [width, height, meta]
+    label_schema_hint:
+      bboxes: [{x1: int, y1: int, x2: int, y2: int, label: str}]
+    examples:
+      record_jsonl: |
+        {"id":5,"task":"object-detection","image_path":"image/5.png","label_path":"label/5.json","width":1920,"height":1080}
+
+  instance-segmentation:
+    description: "이미지 입력 → mask(폴리곤/RLE)/bbox/label"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png", "label/{id}.json"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, label_path]
+      optional: [meta]
+    label_schema_hint:
+      instances: [{label: str, bbox: [int,int,int,int], mask: "polygon|rle"}]
+
+  image-to-text:
+    description: "OCR, 캡셔닝 등 이미지 → 텍스트 생성"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, target]
+      optional: [prompt, meta]
+    examples:
+      record_jsonl: |
+        {"id":0,"task":"image-to-text","image_path":"image/0.png","target":"Hello world"}
+
+  vqa:
+    description: "이미지+질문 → 답변 (멀티모달 QA)"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, question, answer]
+      optional: [meta]
+    examples:
+      record_jsonl: |
+        {"id":7,"task":"vqa","image_path":"image/7.png","question":"What color is the car?","answer":"red"}
+
+  # ---------------------------
+  # AUDIO
+  # ---------------------------
+  asr:
+    description: "음성 → 텍스트"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["audio/{id}.wav"]
+      required_index: true
+    index_schema:
+      required: [id, audio_path, target]
+      optional: [lang, duration_sec, meta]
+    examples:
+      record_jsonl: |
+        {"id":0,"task":"asr","audio_path":"audio/0.wav","target":"안녕하세요","lang":"ko"}
+
+  tts:
+    description: "텍스트 → 음성 (참고: 학습 포맷은 다양, 여기서는 pairing만 정의)"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["audio/{id}.wav"]
+      required_index: true
+    index_schema:
+      required: [id, input, audio_path]
+      optional: [speaker_id, lang, meta]
+
+  audio-classification:
+    description: "음성 → 클래스"
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["audio/{id}.wav"]
+      required_index: true
+    index_schema:
+      required: [id, audio_path, label]
+      optional: [duration_sec, meta]
+    common_recommended: ["label_map.json"]
+
+  # ---------------------------
+  # TABULAR / TIME SERIES
+  # ---------------------------
+  tabular-classification:
+    description: "구조화 데이터(행) → 클래스"
+    split_layout:
+      mode: "index_only"
+      required_index: true
+    index_schema:
+      required: [id, features, label]
+      optional: [meta]
+    examples:
+      record_jsonl: |
+        {"id":0,"task":"tabular-classification","features":{"age":31,"country":"KR"},"label":"buy"}
+
+  tabular-regression:
+    description: "구조화 데이터(행) → 연속값"
+    split_layout:
+      mode: "index_only"
+      required_index: true
+    index_schema:
+      required: [id, features, target]
+      optional: [meta]
+
+  time-series-forecasting:
+    description: "시계열 입력 → 미래값 예측"
+    split_layout:
+      mode: "index_only_or_files"
+      required_index: true
+      allowed_assets: ["series/{id}.parquet", "series/{id}.npy"]
+    index_schema:
+      required: [id, series_path, horizon, target]
+      optional: [meta]
+
+  # ---------------------------
+  # RECOMMENDER
+  # ---------------------------
+  recommender-ranking:
+    description: "추천/랭킹 (user-item interaction 기반)"
+    split_layout:
+      mode: "index_only"
+      required_index: true
+    index_schema:
+      required: [id, user_id, item_id, label]
+      optional: [timestamp, context, meta]
+    common_recommended:
+      - "catalog.parquet"
+      - "id_mapping.json"
+      - "schema.json"
+    examples:
+      record_jsonl: |
+        {"id":1,"task":"recommender-ranking","user_id":"u1","item_id":"i9","label":1,"timestamp":1700000000}
+
+  recommender-sequence:
+    description: "시퀀스 추천 (user history → next item)"
+    split_layout:
+      mode: "index_only"
+      required_index: true
+    index_schema:
+      required: [id, user_id, item_history, target_item]
+      optional: [timestamp, meta]
+
+  # ---------------------------
+  # MULTI-MODAL / DOCUMENT
+  # ---------------------------
+  document-qa:
+    description: "문서(이미지/PDF) + 질문 → 답변 (페이지 단위/영역 단위 지원)"
+    split_layout:
+      mode: "assets_plus_index"
+      required_index: true
+      assets_required:
+        - "document/{id}.pdf"      # or images
+    index_schema:
+      required: [id, document_path, question, answer]
+      optional: [page, bbox, meta]
+    examples:
+      record_jsonl: |
+        {"id":0,"task":"document-qa","document_path":"document/0.pdf","question":"Total amount?","answer":"$123.45","page":1}
+
+  multimodal-chat:
+    description: "이미지/텍스트 등 멀티모달 입력 → 텍스트 응답"
+    split_layout:
+      mode: "assets_plus_index"
+      required_index: true
+    index_schema:
+      required: [id, inputs, target]
+      optional: [meta]
+    examples:
+      record_jsonl: |
+        {"id":0,"task":"multimodal-chat","inputs":[{"type":"image","path":"image/0.png"},{"type":"text","text":"Describe"}],"target":"A cat on a sofa."}
+
+  # ---------------------------
+  # OCR
+  # ---------------------------
+  ocr-recognition:
+    description: "OCR 인식(Recognition): 이미지(또는 crop) → 텍스트. bbox 없이 단일 문자열 또는 라인 단위 출력."
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, target]
+      optional: [lang, meta]
+    examples:
+      dir_tree: |
+        train/
+          image/0.png
+          train.jsonl
+      record_jsonl: |
+        {"id":0,"task":"ocr-recognition","image_path":"image/0.png","target":"Text Recognition: Hello","lang":"en"}
+
+  ocr-line-recognition:
+    description: "라인 단위 OCR: 문서/스크린샷에서 line crop 이미지 → line text. line split 결과물 학습에 적합."
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, target, line_id]
+      optional: [parent_id, bbox, lang, meta]
+    examples:
+      record_jsonl: |
+        {"id":120,"task":"ocr-line-recognition","parent_id":7,"line_id":3,"image_path":"image/120.png","target":"회원가입","bbox":[10,220,380,260],"lang":"ko"}
+
+  ocr-detection:
+    description: "텍스트 검출(Detection): 이미지 → 텍스트 영역 bbox(다각형/사각형). 인식 텍스트는 선택."
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png", "label/{id}.json"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, label_path]
+      optional: [width, height, meta]
+    label_schema_hint:
+      # polygon 기반도 허용
+      boxes:
+        - bbox: [int, int, int, int]          # x1,y1,x2,y2
+          polygon: [[int,int], [int,int], ...] # optional
+          label: "text"                        # optional
+    examples:
+      record_jsonl: |
+        {"id":5,"task":"ocr-detection","image_path":"image/5.png","label_path":"label/5.json","width":1920,"height":1080}
+
+  ocr-kie:
+    description: "문서 KIE/폼 이해: 이미지(+텍스트 영역) → key-value/필드 구조 추출 (invoice/receipt 등)."
+    split_layout:
+      mode: "assets_plus_index"
+      assets_required: ["image/{id}.png", "label/{id}.json"]
+      required_index: true
+    index_schema:
+      required: [id, image_path, label_path, target]
+      optional: [lang, meta]
+    label_schema_hint:
+      # 입력(검출/인식 결과) + target(정답 구조)
+      input_regions:
+        - bbox: [int,int,int,int]
+          text: str
+      target_format: "json"
+    examples:
+      record_jsonl: |
+        {"id":9,"task":"ocr-kie","image_path":"image/9.png","label_path":"label/9.json","target":{"total":"123.45","date":"2026-02-23"}}
+
+validation:
+  # 문서 규칙(정적 검증) 아이디어: 파이프라인 테스트에서 체크할 수 있는 항목들
+  checks:
+    - "stats.json exists and is valid JSON"
+    - "train/ and valid/ exist"
+    - "train index exists (train.jsonl or train.parquet)"
+    - "valid index exists (valid.jsonl or valid.parquet)"
+    - "all asset paths referenced in index exist (if assets_plus_index)"
+    - "common/ exists (can be empty)"

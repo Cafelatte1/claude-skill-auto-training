@@ -1,0 +1,20 @@
+{
+  "seed": 42,
+  "loop_config": {
+    "max_versions": 10
+  },
+  "dataset_config": {
+    "dataset_id": "v1"
+  },
+  "training_config": {
+    "num_gpus": 1,
+    "epochs": 20,
+    "eval_step": "every_epoch",
+    "loss_function": "logloss"
+  },
+  "eval_config": {
+    "primary_metric": "loss",
+    "metrics": ["loss", "accuracy"],
+    "infer_samples": 10
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "seed": 42,
+  "dataset_config": {
+    "prepdata_version": "v1",
+    "task_type": "image-classification",
+    "valid_ratio": 0.1,
+    "split_strategy": "uniform",
+    "stratify_key": "category",
+    "max_profile_samples": 1000,
+    "max_train_samples": 10000
+  },
+  "model_config": {
+    "IMG_SIZE": [384, 384],
+    "vision_backbone": "efficientnetv2",
+    "vision_pretrained": true,
+    "expected_pooled_output_dim": 1280
+  },
+  "baseline_smoke_test": {
+    "num_gpus": 1,
+    "epoch": 1,
+    "train_samples": 100,
+    "valid_samples": 100,
+    "min_batch_size": 4,
+    "max_batch_size": 32
+  }
+}
