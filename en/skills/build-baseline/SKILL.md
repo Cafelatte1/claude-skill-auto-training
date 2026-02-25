@@ -1,15 +1,15 @@
 ---
 name: build-baseline
-description: A skill that automatically explores the raw source data to infer sample units and label/path rules, documents them as a fixed standard, and then generates preprocessing code and baseline training code that are immediately runnable and pass smoke tests. Throughout execution, it prioritizes user-defined rules above all else and creates/verifies task-specific data structures and validation rules in a consistent, standardized way.
+description: A skill that automatically explores raw source data, infers sample-level and label/path rules on its own, documents those rules as a fixed reference, and produces preprocessing data plus baseline training code in an immediately runnable state—passing a smoke test. Throughout execution, it prioritizes user-defined rules above all else and generates/verifies task-specific data structures and validation rules under a consistent standard.
 ---
 
 ## When to use
 
-* Use this skill **only when the user explicitly types** **`/build-baseline`**.
-* Use it when there are multiple source folders under `dataset/rawdata/` and you want the model to explore them, document parsing rules, and generate a standard pipeline/baseline codebase accordingly.
-* Use it when you want to write the baseline training script (`02_train_baseline.py`) following the standard rules and ensure it passes a smoke test.
-* Use it when you want to manage validation splits with advanced strategies (e.g., stratified/group-based) instead of a simple random split.
-* Use it when you want to align data, loader, and schema strictly to `task_format.yaml` to keep task-specific structures consistent.
+- Use **only** when the user explicitly enters **`/build-baseline`**.
+- Use when there are multiple source folders under `dataset/rawdata/` and you want the model to explore them directly, document parsing rules, and then generate a standard pipeline/baseline codebase.
+- Use when you want to write the baseline training script (`02_train_baseline.py`) according to a standard rule set and pass a smoke test.
+- Use when you want to manage validation splits with advanced strategies (e.g., stratified/group-based) rather than simple random splits.
+- Use when you want to align data/loader/schema to `task_format.yaml` to keep task-specific data structures consistent.
 
 ---
 
@@ -17,17 +17,34 @@ description: A skill that automatically explores the raw source data to infer sa
 
 ### Common
 
-* On execution, this skill must reference **`./user_defined_rules.json`** and **`./user_instruction.md`** with the **highest priority**.
-* Any items specified in `user_defined_rules.json` and `user_instruction.md` are treated as **user-defined constraints** and must not be changed arbitrarily across training/evaluation/analysis/next-version drafting.
-* `user_defined_rules.json` and `./user_instruction.md` must be in the same directory as this SKILL.md. If missing, assume there are **no user-defined constraints**.
-* `task_format.yaml` must exist at `./task_format.yaml` (same directory as this SKILL.md). If missing, **stop the skill**.
-* Steps 0–2 must pass their tests before proceeding to the next step.
-* Any operation involving randomness (sampling, split, shuffle, subset extraction, smoke-test sample selection, etc.) must be reproducible using the root `seed` key. If missing, use `42`.
-* In this skill, `{version}` always refers to `user_defined_rules.json.dataset_config.dataset_id`.
+- When running, this skill **must** prioritize **`./user_defined_rules.json`** and **`./user_instruction.md`** above all else.
+- Items specified in `user_defined_rules.json` and `user_instruction.md` are treated as **user-defined constraints** and must not be changed arbitrarily across the entire process (training/evaluation/analysis/next-version writing).
+- `user_defined_rules.json` and `./user_instruction.md` must be in the same directory as this SKILL.md. If missing, assume there are **no user-defined constraints**.
+- `task_format.yaml` must exist at `./task_format.yaml` in the same directory as this SKILL.md. If missing, **stop** this skill.
+- Steps 0–2 must pass tests after writing code before proceeding to the next step.
+- Any operation involving “randomness” (sampling, split, shuffle, subset extraction, smoke-test sample selection, etc.) must be reproducible using the root `seed` value. If `seed` is missing, use 42.
+- In this skill, `{dataset_id}` always refers to `user_defined_rules.dataset_config.dataset_id`.
+  - Example: `dataset_id = "v1"` → `dataset/prepdata/v1/...`
 
-  * Example: `dataset_id = "v1"` → `dataset/prepdata/v1/...`
+#### Script/Artifact save rules (this skill)
 
-Example (partial) `user_defined_rules.json`:
+- Save the data pipeline script at the project root:
+  - `./01_data_pipeline.py`
+- Save the baseline training script at the project root:
+  - `./02_train_baseline.py`
+- Save baseline artifacts under the fixed path:
+  - `Models/Artifacts/Baseline/...`
+
+#### progressive-training integration rules (reference)
+
+- `build-baseline` does not create a run-scoped (dataset_id loop) folder.
+- The follow-up skill `progressive-training` generates `run_id = YYYY-MM-DD_HH-MM` once at start, and uses:
+  - Version training script: `./Runs/{run_id}/02_train_v###.py`
+  - Version artifacts: `Models/Runs/{run_id}/Artifacts/v###/...`
+  - Report: `Models/Runs/{run_id}/Report/...`
+  `build-baseline` only verifies that baseline outputs are valid according to this convention.
+
+Example excerpt of `user_defined_rules.json`:
 
 ```json
 {
@@ -56,40 +73,41 @@ Example (partial) `user_defined_rules.json`:
 
 ---
 
-### Step 0) Rawdata Profiling Document + Test (Rawdata profiling)
+### Step 0) Rawdata profiling doc creation & test (Rawdata profiling)
 
 Role:
 
-* Explore all source folders under `dataset/rawdata/` and analyze files/structures to **freeze** per-source parsing rules and sample-unit definitions as a document.
-* If `dataset_config.task_type` is missing, define it via profiling and provide guidelines so the data can be structured accordingly.
-* All later pipeline steps must read this document and follow the **exact same rules**.
-* Proceed only if documentation and minimum validation (sample load test) pass.
+* Directly explore every source folder under `dataset/rawdata/` and analyze internal files/structure to fix per-source parsing rules and the sample-unit definition as documentation.
+* If `dataset_config.task_type` is missing, define it via profiling and provide guidelines so the data can be structured to match `dataset_config.task_type`.
+* All later data-pipeline steps must read this document and follow the same rules.
+* Proceed only after the document is written and minimum validation (sample-load test) passes.
+* If `profiling.md` already exists, skip this step.
 
 Inputs:
 
 * `user_defined_rules.json` (highest priority)
 
-  * `seed` (default 42)
+  * `seed` (default 42 if missing)
   * `dataset_config.task_type` (optional)
   * `dataset_config.max_profile_samples` (optional)
-* `dataset/rawdata/*` (all sources; not a single specific source)
+* `dataset/rawdata/*` (the entire folder, not a single source)
 
-Work (auto-exploration + documentation):
+Work (auto exploration + documentation):
 
 * Identify profiling target directories under `dataset/rawdata/`.
 
   * Include: `dataset/rawdata/{source}/...`
-  * Exclude: document files like `dataset/rawdata/profiling.md`
-* For each `{source}`, perform the steps below and write results into a single consolidated document.
-* Limit total scanned/loaded/sampled items during profiling to `max_profile_samples` (default 1,000), selected reproducibly using `seed`.
+  * Exclude: documentation files like `dataset/rawdata/profiling.md`
+* For each `{source}`, do the following and consolidate results into a single document.
+* Cap the total number of samples actually loaded/scanned/sampled during profiling to `max_profile_samples` (default 1,000). Target selection must be reproducible via `seed`.
 
-Minimum required contents of `dataset/rawdata/profiling.md` (MUST):
+Minimum required structure for `dataset/rawdata/profiling.md` (MUST):
 
-* `Overview` (overall rawdata overview, list of sources, estimated scale)
+* `Overview` (overall rawdata overview, source list, size estimates)
 * `Sources`
 
-  * One section per source: `## Source: {source_name}`
-* Required subsections per source:
+  * A section per source: `## Source: {source_name}`
+* Required contents per source section:
 
   * `Sample unit definition`
   * `Paths & naming rules`
@@ -100,39 +118,42 @@ Minimum required contents of `dataset/rawdata/profiling.md` (MUST):
 
 Work (test: minimum load validation):
 
-* For each source, load N random samples (recommended N=10) and verify:
+* For each source, load N random samples (recommended 10) and verify:
 
-  * sample-unit parsing works
-  * asset/label matching rules are consistent (if applicable)
-  * label schema parsing works
+  * Sample-unit parsing works
+  * Asset/label matching rule consistency (if applicable)
+  * Label schema parsing works
 * Sample selection must be reproducible via `seed`.
 * Record PASS/FAIL at the bottom of each source section.
 
-Outputs (required):
+Required outputs:
 
 * `dataset/rawdata/profiling.md`
 
 ---
 
-### Step 1) Data Pipeline Code + Test (Data pipeline)
+### Step 1) Data pipeline code & test (Data pipeline)
 
 Role:
 
-* Read `dataset/rawdata/profiling.md` from Step 0 and parse/normalize rawdata into prepdata following the documented rules.
-* Generate `dataset/prepdata/{version}/...` in the structure recommended by `./task_format.yaml` under `supported_tasks[{task_type}]`.
+* Read `dataset/rawdata/profiling.md` from Step 0 and parse/normalize rawdata to generate prepdata according to those rules.
+* Create `dataset/prepdata/{dataset_id}/...` in the structure recommended by `./task_format.yaml` under `supported_tasks[{task_type}]`.
 * Proceed only after code is written and tests pass.
+* If `01_data_pipeline.py` already exists:
+
+  * Delete that script and `dataset/prepdata/{dataset_id}/...`, then proceed.
 
 Inputs:
 
 * `user_defined_rules.json` (highest priority)
 
-  * `seed` (default 42)
-  * `dataset_config.dataset_id` → `{version}`
+  * `seed` (default 42 if missing)
+  * `dataset_config.dataset_id` → `{dataset_id}`
   * `dataset_config.task_type`
-  * `dataset_config.valid_ratio` (optional; default if missing)
-  * `dataset_config.split_strategy` (default `random`)
-  * `dataset_config.stratify_key` (default `category`)
-  * `dataset_config.group_key` (default `group_id`)
+  * `dataset_config.valid_ratio` (use default if missing)
+  * `dataset_config.split_strategy` (default `random` if missing)
+  * `dataset_config.stratify_key` (default `category` if missing)
+  * `dataset_config.group_key` (default `group_id` if missing)
   * `dataset_config.max_train_samples` (optional)
 * `task_format.yaml` (required)
 * `dataset/rawdata/profiling.md` (required)
@@ -140,258 +161,264 @@ Inputs:
 
 Work (code writing):
 
-#### Apply profiling document rules
+* Apply profiling document rules
 
-* Must parse rawdata strictly according to `dataset/rawdata/profiling.md`.
-* Do not introduce new “guessed parsing logic” that conflicts with profiling.md.
-* If needed, update profiling.md first, then adjust the pipeline.
+  * Always parse rawdata based on `dataset/rawdata/profiling.md`.
+  * Do not invent new “guessed parsing logic” that conflicts with profiling.md.
+  * If needed, update profiling.md first, then adjust the pipeline.
 
-#### Build meta table: `df_meta`
+* Create meta table: `df_meta`
 
-* Create `df_meta` based on `Extraction rules` in profiling.md.
-* `df_meta` must support multiple sources and include a `source` column.
-* If `dataset_config.max_train_samples` exists:
+  * Build `df_meta` according to profiling.md `Extraction rules`.
+  * Include a `source` column so multiple sources can be managed together.
+  * If `dataset_config.max_train_samples` exists: first determine the full pool of trainable samples that pass preprocessing/validation, then reproducibly sample up to `max_train_samples` from that pool using `seed` to form `df_meta`.
+  * If there is no extra user instruction, apply uniform random sampling by source.
+  * Minimum columns:
 
-  * first finalize the valid trainable sample pool (after preprocessing/validation)
-  * then sample up to `max_train_samples` from that pool reproducibly using `seed`.
-* If not specified otherwise, use uniform random sampling across sources.
+    * `sample_id`, `source`, `category` (null if missing), `asset_paths`
+  * Recommended columns:
 
-Minimum columns:
+    * `group_id`, `lang`, `length`, `width`, `height`, `timestamp`, `label_summary`, `hash`
+  * Recommended save:
 
-* `sample_id`, `source`, `category` (null if missing), `asset_paths`
+    * `dataset/prepdata/{dataset_id}/common/df_meta.parquet`
 
-Recommended columns:
+* Validation split
 
-* `group_id`, `lang`, `length`, `width`, `height`, `timestamp`, `label_summary`, `hash`
+  * Split must be reproducible via `seed`.
+  * Support the following via `split_strategy`:
 
-Recommended save path:
+    * `random`
+    * `stratified` (default `category`)
+    * `group` (default `group_id`)
+  * Recommended: save split results as manifests:
 
-* `dataset/prepdata/{version}/common/df_meta.parquet`
+    * `dataset/prepdata/{dataset_id}/common/train_manifest.parquet`
+    * `dataset/prepdata/{dataset_id}/common/valid_manifest.parquet`
 
-#### Validation split
+* Generate prepdata (must follow `task_format.yaml`)
 
-* Must be reproducible via `seed`.
-* Support strategies by `split_strategy`:
+  * Generate outputs following `task_format.yaml.supported_tasks[{task_type}]` `split_layout` and `index_schema`:
 
-  * `random`
-  * `stratified` (default key: `category`)
-  * `group` (default key: `group_id`)
-* For `stratified`, exact distribution matching is not required; it is acceptable as long as it is not severely skewed.
-* Recommended manifests:
-
-  * `dataset/prepdata/{version}/common/train_manifest.parquet`
-  * `dataset/prepdata/{version}/common/valid_manifest.parquet`
-
-#### Generate prepdata following `task_format.yaml`
-
-* Must follow `task_format.yaml.supported_tasks[{task_type}]` for `split_layout` and `index_schema`:
-
-  * `dataset/prepdata/{version}/stats.json`
-  * `dataset/prepdata/{version}/train/`
-  * `dataset/prepdata/{version}/valid/`
-  * `dataset/prepdata/{version}/common/`
+    * `dataset/prepdata/{dataset_id}/stats.json`
+    * `dataset/prepdata/{dataset_id}/train/`
+    * `dataset/prepdata/{dataset_id}/valid/`
+    * `dataset/prepdata/{dataset_id}/common/`
 
 Work (tests):
 
 * Run consistency checks based on `task_format.yaml.validation.checks`.
-* Additional checks per split strategy:
+* Additional checks by split strategy:
 
   * `group`: no group leakage
-  * `stratified`: do not force PASS/FAIL; record distribution summary in the report
-* Required file/folder checks:
+  * `stratified`: only record a distribution summary in the report
+* Required files/folders:
 
   * `stats.json`, `train/`, `valid/`, `common/`
   * `train.jsonl|train.parquet`, `valid.jsonl|valid.parquet`
 
-Outputs (required):
+Required outputs:
 
-* Data pipeline code: `01_data_pipeline.py`
-* `dataset/prepdata/{version}/stats.json`
-* `dataset/prepdata/{version}/train/`
-* `dataset/prepdata/{version}/valid/`
-* `dataset/prepdata/{version}/common/`
-* (Recommended) `dataset/prepdata/{version}/common/df_meta.parquet`
-* (Recommended) `dataset/prepdata/{version}/_tests/pipeline_test_report.md`
+* Data pipeline code: `./01_data_pipeline.py`
+* `dataset/prepdata/{dataset_id}/stats.json`
+* `dataset/prepdata/{dataset_id}/train/`
+* `dataset/prepdata/{dataset_id}/valid/`
+* `dataset/prepdata/{dataset_id}/common/`
+* (Recommended) `dataset/prepdata/{dataset_id}/common/df_meta.parquet`
+* (Recommended) `dataset/prepdata/{dataset_id}/_tests/pipeline_test_report.md`
 
 ---
 
-### Step 2) Baseline Training Code + Test (Baseline)
+### Step 2) Baseline training code & test (Baseline)
 
 Role:
 
-* Write `02_train_baseline.py` and validate that training/validation runs correctly using only a small subset (default 100 train + 100 valid) for debugging/smoke testing.
-* Proceed only after code is written and smoke tests pass.
+* Write `./02_train_baseline.py`, and verify training/validation runs correctly with only minimal samples (train/valid 100 each) for debug/smoke-test purposes.
+* Proceed only after code is written and the smoke test passes.
+* If `02_train_baseline.py` already exists:
+
+  * Delete that script and `Models/Artifacts/Baseline/...`, then proceed.
 
 Inputs:
 
 * `user_defined_rules.json` (highest priority)
 
-  * `seed` (default 42)
-  * `dataset_config.dataset_id` → `{version}` and `DATASET_ID`
+  * `seed` (default 42 if missing)
+  * `dataset_config.dataset_id`
   * `dataset_config.task_type`
-  * `baseline_smoke_test.epoch` (optional; default 1)
-  * `baseline_smoke_test.train_samples` (default 100)
-  * `baseline_smoke_test.valid_samples` (default 100)
+  * `baseline_smoke_test.epoch` (optional, default 1 if missing)
+  * `baseline_smoke_test.train_samples` (default 100 if missing)
+  * `baseline_smoke_test.valid_samples` (default 100 if missing)
   * `baseline_smoke_test.min_batch_size` (optional)
   * `baseline_smoke_test.max_batch_size` (optional)
   * (Optional) `training_config.*`, `model_config.*`
 * `task_format.yaml` (required)
-* `dataset/prepdata/{version}/train/`
-* `dataset/prepdata/{version}/valid/`
-* `dataset/prepdata/{version}/common/` (optional depending on task)
+* `dataset/prepdata/{dataset_id}/train/`
+* `dataset/prepdata/{dataset_id}/valid/`
+* `dataset/prepdata/{dataset_id}/common/` (optional, depending on task)
 
 Work (code writing):
 
 #### Generate baseline training script
 
-* Write `02_train_baseline.py`.
-* Must include a global variable `DATASET_ID: str`, and it must equal `{version}` (=`dataset_config.dataset_id`).
-* Data loading must treat `dataset/prepdata/{version}` as the single source of truth and follow structure/schema required by `task_format.yaml.supported_tasks[{task_type}]`.
-* Subset selection for smoke testing must be reproducible via `seed`.
-* Must create minimal artifact/log structure:
+* Write `./02_train_baseline.py`.
+* `./02_train_baseline.py` must include a global variable `DATASET_ID: str`, and it must equal `{dataset_id}` (= `dataset_config.dataset_id`).
+* Data loading must treat `dataset/prepdata/{dataset_id}` as the single source of truth and follow the structure/schema in `task_format.yaml.supported_tasks[{task_type}]`.
+* Smoke-test subset selection must be reproducible via `seed`.
 
-  * `Models/Artifacts/baseline/spec.json`
-  * `Models/Artifacts/baseline/additional_assets/`
-  * `Models/Artifacts/baseline/logs/version_0/{metrics.csv,hparams.yaml}`
-* Must support smoke-test mode:
+#### Baseline artifact/log structure (MUST)
 
-  * sample N/M items from train/valid (default 100 each)
-  * run only `baseline_smoke_test.epoch` (default 1) to validate execution
+* Even for a smoke test, outputs **must** be generated with the fixed structure below:
 
-#### Find optimal batch size
+  * `Models/Artifacts/Baseline/spec.json`
+  * `Models/Artifacts/Baseline/additional_assets/`
+  * `Models/Artifacts/Baseline/best.ckpt`
+  * `Models/Artifacts/Baseline/last.ckpt`
+  * `Models/Artifacts/Baseline/logs/version_0/{metrics.csv,hparams.yaml}`
+  * `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`
 
-* Search batch sizes in the range `min_batch_size ~ max_batch_size` using powers of two:
+* When `progressive-training` starts a run from this baseline:
 
-  * candidates: `bs ∈ { 2^k | min_batch_size ≤ 2^k ≤ max_batch_size }`
-* Run only 10 steps per candidate.
-* Start from the largest batch size; stop immediately if the largest succeeds.
-* Choose the largest successful batch size as `optimal_batch_size`.
-* Success criteria:
+  * It copies `./02_train_baseline.py` to `./Runs/{run_id}/02_train_v###.py`.
+  * It references baseline artifacts in-place from `Models/Artifacts/Baseline/`.
 
-  * PASS if forward+backward completes for 10 steps without OOM/RuntimeError.
-* Must log results into `_tests/baseline_smoke_test_report.md`.
+Work (search for optimal batch size):
 
-#### Validate `expected_*` contracts
+* From `baseline_smoke_test.min_batch_size ~ baseline_smoke_test.max_batch_size`, construct power-of-two batch size candidates and search:
 
-* Treat every key in `user_defined_rules.json.model_config` starting with `expected_` as a contract to validate.
-* Prefer computing observed values using a single dummy forward pass (batch=1, minimal input).
-* Minimal input must satisfy model input constraints (H_TARGET, W_BUCKETS, etc.) if any.
+  * Run the batch-size search for only 10 steps.
+  * Candidate rule: `bs ∈ { 2^k | min_batch_size ≤ 2^k ≤ max_batch_size }`
+  * Start from the largest batch size; if it succeeds, stop immediately.
+  * Choose the largest successful batch size as `optimal_batch_size`.
+  * Success criterion:
 
-Validation procedure (MUST):
+    * PASS if forward+backward completes for 10 steps without OOM/RuntimeError.
+  * Always record results in `_tests/baseline_smoke_test_report.md`.
 
-1. Collect all `expected_*` entries into `expected_map`.
-2. If `expected_map` is empty, **SKIP** this validation step (not a FAIL).
-3. Build `observed_map` from “verifiable actual values” produced/loaded by the training code.
+Work (expected_* validation):
 
-   * `observed_map` must use the same suffix naming:
+* Treat all keys in `user_defined_rules.model_config` with the `expected_` prefix as validation contracts.
 
-     * `expected_stride` ↔ `observed_stride`, `expected_channels` ↔ `observed_channels`
-4. Decide PASS/FAIL per key (apply type rules below).
+  * Examples: `expected_stride`, `expected_channels`, `expected_out_shape`, `expected_dtype`, ...
 
-Type comparison rules (MUST):
+* Prefer deriving observations via a single dummy forward pass (batch=1, minimal input).
 
-* Scalar (number/string/bool): `observed == expected` else FAIL
-* List/tuple: length, elements, and order must match
-* Dict: all keys must exist and all values must match
-* Float: exact match unless `model_config.expected_tolerance` exists; then require `abs(observed-expected) <= tolerance`
+* Minimal input must satisfy model input constraints in `model_config` (e.g., H_TARGET, W_BUCKETS).
 
-Handling unobservable values (MUST):
+* Validation procedure (MUST):
 
-* If an `observed_*` value cannot be produced, mark FAIL.
-* Exception: if `model_config.expected_allow_missing_keys: true`, record `SKIP(allow_missing)` and do not fail overall.
+  1. Collect all `expected_*` items from `model_config` into `expected_map`.
+  2. If `expected_map` is empty, **SKIP** this validation stage (not a FAIL).
+  3. Build `observed_map` from “verifiable actual values” produced/loaded by the current training code.
 
-On failure (MUST):
+     * `observed_map` must use the same suffix names as `expected_*`.
 
-* If any FAIL occurs, stop immediately and do not run batch search/smoke run.
-* Re-run only after fixing config (`expected_*` etc.) or code (observation logic).
+       * Example: `expected_stride` ↔ `observed_stride`, `expected_channels` ↔ `observed_channels`
+  4. Decide PASS/FAIL per `expected_*` (apply type rules below).
 
-Report logging (MUST):
+* Type-specific comparison rules (MUST):
 
-* Include the following in `Models/Artifacts/baseline/_tests/baseline_smoke_test_report.md`:
+  * Scalars (number/string/bool): PASS only if `observed == expected`
+  * Lists/tuples: PASS only if length/items/order all match
+  * Dicts: PASS only if all keys exist and values match
+  * Floats: if `model_config.expected_tolerance` (optional) is missing, require exact match; otherwise require `abs(observed-expected) <= tolerance`
 
-  * `expected_map`
-  * `observed_map`
-  * `validation_table` (key, expected, observed, status PASS/FAIL/SKIP, reason)
-  * `overall_result: PASS|FAIL`
+* Handling non-observable values (MUST):
 
-#### Smoke run
+  * If an `observed_*` value cannot be produced, mark as FAIL.
+  * Exception: if `model_config.expected_allow_missing_keys: true`, record as `SKIP(allow_missing)` and do not fail overall.
 
-* Purpose: ensure the script runs without errors and produces artifacts.
-* Run smoke training only with the selected `optimal_batch_size`.
+* Failure behavior (MUST):
+
+  * If any FAIL occurs, stop immediately without running training (batch search/smoke run).
+  * Re-run only after fixing configs (`expected_*` or related) or code (observation logic).
+
+* Report content (MUST):
+
+  * Include the following in `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`:
+
+    * `expected_map`
+    * `observed_map`
+    * `validation_table` (key, expected, observed, status(PASS/FAIL/SKIP), reason)
+    * `overall_result: PASS|FAIL`
+
+Work (smoke run):
+
+* The smoke test verifies: “the training script runs without error and produces outputs in the artifact path.”
+* Run the smoke training only with `optimal_batch_size` selected above.
 * Run with train N + valid M samples.
 * Minimum pass conditions:
 
-  * training starts and finishes without errors
+  * Training starts and finishes without errors
   * `best.ckpt` and `last.ckpt` are created
   * `spec.json`, `additional_assets/`, and logs are created
 
-#### Failure/exception handling rules for training
+#### Training failure (error/exception) handling rules
 
-* If an exception occurs while running `02_train_baseline.py`, fully reset (delete and recreate) the artifact directory:
+* If an exception occurs while running `./02_train_baseline.py`, **reset** (delete and recreate) the baseline artifact directory:
 
-  * target: entire `Models/Artifacts/baseline/`
-* Summarize root cause based on error logs/stack traces and apply **code fixes**.
+  * Target: `Models/Artifacts/Baseline/` (entire directory)
+* After reset, summarize the cause based on logs/stack traces and apply a **code fix**:
 
-  * fix targets: `02_train_baseline.py` (and local modules it imports if needed)
-  * user constraints (`user_defined_rules.json`, `user_instruction.md`) always take priority; bypassing constraints is forbidden
-* Re-run using the same version (`baseline`).
-* (Recommended) record retry history in:
+  * Target: `./02_train_baseline.py` (and local modules imported by it, if needed)
+  * User-defined constraints (`user_defined_rules.json`, `user_instruction.md`) always take priority; bypassing constraints is forbidden.
+* After fixes, re-run training with the same **Baseline**.
+* (Recommended) include retry history in:
 
-  * `Models/Artifacts/baseline/_tests/baseline_smoke_test_report.md`
+  * `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`
 
-    * include at least: `attempt`, `error_summary`, `root_cause_hypothesis`, `code_change_summary`, `status(PASS/FAIL)`
+    * Minimum: `attempt`, `error_summary`, `root_cause_hypothesis`, `code_change_summary`, `status(PASS/FAIL)`
 
-#### Artifact saving
+Required outputs:
 
-* Even for smoke runs, the following files must be created:
-
-  * `Models/Artifacts/baseline/best.ckpt`
-  * `Models/Artifacts/baseline/last.ckpt`
-* Recommended best checkpoint criterion: choose best by `valid_loss` (loss-based is fine; document the criterion in `spec.json`).
-* If checkpoint saving is impossible for the given task/framework, stop and document an alternative rule (do not omit arbitrarily).
-
-Outputs (required):
-
-* `02_train_baseline.py`
-* `Models/Artifacts/baseline/spec.json`
-* `Models/Artifacts/baseline/best.ckpt`
-* `Models/Artifacts/baseline/last.ckpt`
-* `Models/Artifacts/baseline/additional_assets/`
-* `Models/Artifacts/baseline/logs/version_0/{metrics.csv,hparams.yaml}`
-* `Models/Artifacts/baseline/_tests/baseline_smoke_test_report.md`
+* `./02_train_baseline.py`
+* `Models/Artifacts/Baseline/spec.json`
+* `Models/Artifacts/Baseline/best.ckpt`
+* `Models/Artifacts/Baseline/last.ckpt`
+* `Models/Artifacts/Baseline/additional_assets/`
+* `Models/Artifacts/Baseline/logs/version_0/{metrics.csv,hparams.yaml}`
+* `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`
 
 ---
 
-### Step 3) Final check (Final check)
+### Step 3) Final check
 
 Role:
 
-* Perform a final verification that all outputs from Steps 0–2 exist and their tests passed.
+* Perform a final check that all outputs from Steps 0–2 exist and tests passed.
 * If the final check passes, trigger the next skill: **`progressive-training`**.
+
+  * `progressive-training` generates `run_id` at runtime (`YYYY-MM-DD_HH-MM`) and uses:
+
+    * Version scripts: `./Runs/{run_id}/02_train_v###.py`
+    * Version artifacts: `Models/Runs/{run_id}/Artifacts/v###/...`
+    * Report: `Models/Runs/{run_id}/Report/...`
 
 Inputs:
 
-* All artifacts from Steps 0–2
+* All outputs from Steps 0–2
 
 Work:
 
-* Verify using the checklist:
+* Verify via checklist:
 
-  * `dataset/rawdata/profiling.md` exists and contains PASS records per source
-  * `dataset/prepdata/{version}/` contains `stats.json, train/, valid/, common/`
-  * Step 1 tests passed (confirm PASS if report exists)
-  * `02_train_baseline.py` exists
-  * `Models/Artifacts/baseline/` contains `best.ckpt, last.ckpt, spec.json, logs/, additional_assets/, _tests/baseline_smoke_test_report.md`
-  * Step 2 smoke test passed (confirm PASS if report exists)
+  * `dataset/rawdata/profiling.md` exists and contains per-source PASS records
+  * `dataset/prepdata/{dataset_id}/` contains `stats.json, train/, valid/, common/`
+  * Step 1 test passed (confirm PASS if a report exists)
+  * `./02_train_baseline.py` exists
+  * `Models/Artifacts/Baseline/` contains `best.ckpt, last.ckpt, spec.json, logs/, additional_assets/, _tests/baseline_smoke_test_report.md`
+  * Step 2 smoke test passed (confirm PASS if a report exists)
 
 Result:
 
 * If final check passes:
 
-  * Read **`.claude/skills/progressive-training/SKILL.md`** and continue follow-up work by passing the `dataset_id` used in this run
+  * Reset Todo/Todos items
+  * Read **`.claude/skills/progressive-training/SKILL.md`** and continue with `progressive-training`
+  * Pass the dataset_id used in this skill into `progressive-training` unchanged
 * If final check fails:
 
-  * Write detailed failure reasons and conclude the work
+  * Write a detailed failure reason and end the work
 
 ---
 
@@ -414,9 +441,14 @@ dataset/
         │   └── valid_manifest.parquet
         └── _tests/
             └── pipeline_test_report.md
+
+./
+├── 01_data_pipeline.py
+└── 02_train_baseline.py
+
 Models/
 └── Artifacts/
-    └── baseline/
+    └── Baseline/
         ├── spec.json
         ├── additional_assets/
         ├── best.ckpt
@@ -435,18 +467,18 @@ Models/
 ### MUST
 
 * On execution, read and apply `./user_defined_rules.json` with the highest priority.
-* All randomness must use the root `seed` (default 42).
-* Profiling scan/load caps must be controlled by `user_defined_rules.dataset_config.max_profile_samples`.
-* Training sample caps must be controlled by `user_defined_rules.dataset_config.max_train_samples`, applied after preprocessing/validation finalizes the trainable pool.
+* Any operation involving randomness must use the root `seed` value; if missing, use 42.
+* Control profiling scan/load limits via `user_defined_rules.dataset_config.max_profile_samples`.
+* Control the training sample cap via `user_defined_rules.dataset_config.max_train_samples`, applied after fixing the pool of trainable samples that pass preprocessing/validation.
 * Do not run if `task_format.yaml` is missing.
-* Step 0 must auto-explore all source folders under `dataset/rawdata/` and write `dataset/rawdata/profiling.md`.
-* Step 1 must parse rawdata strictly by reading `dataset/rawdata/profiling.md`.
-* Step 2 must generate `02_train_baseline.py` and pass the smoke test.
-* Step 2 must generate **both** `best.ckpt` and `last.ckpt`.
+* Step 0 must auto-explore all source folders under `dataset/rawdata/` and write `dataset/rawdata/profiling.md` (skip only if profiling.md already exists).
+* Step 1 must read `dataset/rawdata/profiling.md` and parse rawdata strictly by those rules.
+* Step 2 must generate `./02_train_baseline.py` and pass the smoke test.
+* Step 2 must **always** produce `best.ckpt` and `last.ckpt`.
+* Baseline artifacts must use `Models/Artifacts/Baseline/`.
 * Step 3 final check must satisfy all conditions to be considered ready.
 
 ### SHOULD
 
-* Save `df_meta.parquet` and split manifests (train/valid) under `common/` to improve data management and reproducibility.
-* For `stratified` split, document the distribution checks and acceptable tolerance.
-* Keep Step 0–2 test reports under `_tests/` as a persistent validation record.
+* Save `df_meta.parquet` and split manifests (train/valid) under `common/` to improve management and reproducibility.
+* Keep test reports for Steps 0–2 under `_tests/` to preserve validation history.

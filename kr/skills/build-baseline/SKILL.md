@@ -23,8 +23,31 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 * `task_format.yaml`은 본 SKILL.md와 동일 디렉토리의 `./task_format.yaml`에 있어야 한다. 없으면 본 스킬을 중단한다.
 * Step 0~2는 코드 작성 후 테스트를 통과해야 다음 step으로 넘어간다.
 * 전체 과정에서 “랜덤성”이 개입되는 모든 작업(샘플링, split, 셔플, subset 추출, 스모크 테스트 샘플 선택 등)은 **루트의 `seed` 키** 값을 사용해 재현 가능해야 한다. `seed`가 없으면 42를 사용한다.
-* 본 스킬에서 `{version}`은 항상 `user_defined_rules.json.dataset_config.dataset_id`를 의미한다.
+* 본 스킬에서 `{dataset_id}`은 항상 `user_defined_rules.dataset_config.dataset_id`를 의미한다.
+
   * 예: `dataset_id = "v1"` → `dataset/prepdata/v1/...`
+
+#### 스크립트/아티팩트 저장 규칙 (본 스킬)
+
+* 데이터 파이프라인 스크립트는 프로젝트 루트에 저장한다.
+
+  * `./01_data_pipeline.py`
+* 베이스라인 학습 스크립트는 프로젝트 루트에 저장한다.
+
+  * `./02_train_baseline.py`
+* 베이스라인 아티팩트는 아래 고정 경로에 저장한다.
+
+  * `Models/Artifacts/Baseline/...`
+
+#### progressive-training 연계 규칙 (참고)
+
+* build-baseline은 run 단위(dataset_id loop) 폴더를 만들지 않는다.
+* 후속 스킬인 progressive-training은 실행 시작 시 `run_id = YYYY-MM-DD_HH-MM`를 1회 생성하며,
+
+  * 버전 학습 스크립트: `./Runs/{run_id}/02_train_v###.py`
+  * 버전 아티팩트: `Models/Runs/{run_id}/Artifacts/v###/...`
+  * 리포트: `Models/Runs/{run_id}/Report/...`
+    를 사용한다. build-baseline은 이 규칙에 맞춰 baseline 산출물이 정상인지 검증만 수행한다.
 
 `user_defined_rules.json` 예시(일부):
 
@@ -63,6 +86,7 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 * `dataset_config.task_type`이 없으면 프로파일링을 통해 직접 정의하고, `dataset_config.task_type`에 맞게 데이터가 구성될 수 있는 가이드라인을 제공한다.
 * 이후 데이터 파이프라인 단계는 반드시 이 문서를 읽고 동일 규칙으로 처리해야 한다.
 * 이 단계는 문서 작성과 최소 검증(샘플 로드 테스트)을 통과해야 다음 단계로 진행한다.
+* 단, profiling.md가 이미 존재하면 건너뛴다.
 
 입력:
 
@@ -118,15 +142,17 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 역할:
 
 * Step 0에서 생성된 `dataset/rawdata/profiling.md`를 읽고, 그 규칙에 따라 rawdata를 파싱/정규화하여 prepdata를 생성한다.
-* `./task_format.yaml`의 `supported_tasks[{task_type}]`가 권장하는 구조로 `dataset/prepdata/{version}/...`를 생성한다.
+* `./task_format.yaml`의 `supported_tasks[{task_type}]`가 권장하는 구조로 `dataset/prepdata/{dataset_id}/...`를 생성한다.
 * 이 단계는 코드 작성과 테스트 통과가 완료되어야 다음 단계로 진행한다.
+* 단, `01_data_pipeline.py` 스크립트가 존재하면:
+  * 해당 스크립트와 `dataset/prepdata/{dataset_id}/...` 폴더를 삭제 후 진행한다.
 
 입력:
 
 * `user_defined_rules.json` (최우선)
 
   * `seed` (없으면 42)
-  * `dataset_config.dataset_id`  → `{version}`
+  * `dataset_config.dataset_id`  → `{dataset_id}`
   * `dataset_config.task_type`
   * `dataset_config.valid_ratio` (없으면 기본값 사용)
   * `dataset_config.split_strategy` (없으면 `random`)
@@ -139,56 +165,49 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 
 작업 (코드 작성):
 
-#### 프로파일링 문서 규칙 적용
+* 프로파일링 문서 규칙 적용
 
-* 반드시 `dataset/rawdata/profiling.md`를 기준으로 rawdata를 파싱한다.
-* profiling.md와 상충하는 “추정 파싱 로직”을 새로 만들지 않는다.
-* 필요한 경우 profiling.md를 먼저 갱신한 후 파이프라인을 수정한다.
+  * 반드시 `dataset/rawdata/profiling.md`를 기준으로 rawdata를 파싱한다.
+  * profiling.md와 상충하는 “추정 파싱 로직”을 새로 만들지 않는다.
+  * 필요한 경우 profiling.md를 먼저 갱신한 후 파이프라인을 수정한다.
 
-#### Meta table 생성: `df_meta`
+* Meta table 생성: `df_meta`
 
-* profiling.md의 `Extraction rules`에 따라 `df_meta`를 생성한다.
+  * profiling.md의 `Extraction rules`에 따라 `df_meta`를 생성한다.
+  * `df_meta`는 여러 source를 함께 관리 가능해야 하므로 `source` 컬럼을 포함한다.
+  * `dataset_config.max_train_samples`가 존재하면, 전처리/검증을 통과한 학습 가능 샘플 풀을 먼저 확정한 뒤, 그 풀에서 seed 기반으로 재현 가능하게 최대 max_train_samples개를 샘플링하여 df_meta를 구성한다.
+  * 별다른 사용자 지시가 없으면 source 기준 균등 분포 랜덤 샘플링을 적용한다.
+  * 최소 컬럼:
 
-* `df_meta`는 여러 source를 함께 관리 가능해야 하므로 `source` 컬럼을 포함한다.
+    * `sample_id`, `source`, `category`(없으면 null), `asset_paths`
+  * 권장 컬럼:
 
-* `dataset_config.max_train_samples`가 존재하면, 전처리/검증을 통과한 학습 가능 샘플 풀을 먼저 확정한 뒤, 그 풀에서 seed 기반으로 재현 가능하게 최대 max_train_samples개를 샘플링하여 df_meta를 구성한다.
+    * `group_id`, `lang`, `length`, `width`, `height`, `timestamp`, `label_summary`, `hash`
+  * 저장(권장):
 
-* 별다른 사용자 지시가 없으면 source 기준 균등 분포 랜덤 샘플링을 적용한다.
+    * `dataset/prepdata/{dataset_id}/common/df_meta.parquet`
 
-* 최소 컬럼:
+* Validation split
 
-  * `sample_id`, `source`, `category`(없으면 null), `asset_paths`
+  * split은 `seed` 기반으로 재현 가능해야 한다.
+  * `split_strategy`에 따라 아래를 지원한다.
 
-* 권장 컬럼:
+    * `random`
+    * `stratified` (기본 `category`)
+    * `group` (기본 `group_id`)
+  * split 결과는 매니페스트로 저장(권장):
 
-  * `group_id`, `lang`, `length`, `width`, `height`, `timestamp`, `label_summary`, `hash`
+    * `dataset/prepdata/{dataset_id}/common/train_manifest.parquet`
+    * `dataset/prepdata/{dataset_id}/common/valid_manifest.parquet`
 
-* 저장(권장):
+* Prepdata 생성: `task_format.yaml` 준수
 
-  * `dataset/prepdata/{version}/common/df_meta.parquet`
+  * `task_format.yaml.supported_tasks[{task_type}]`의 `split_layout`과 `index_schema`를 준수하여 생성한다.
 
-#### Validation split
-
-* split은 `seed` 기반으로 재현 가능해야 한다.
-* `split_strategy`에 따라 아래를 지원한다.
-
-  * `random`
-  * `stratified` (기본 `category`)
-  * `group` (기본 `group_id`)
-* `stratified`의 경우 분포가 완전히 일치할 필요는 없으며, **크게 어긋나지 않는 수준이면 허용**한다.
-* split 결과는 매니페스트로 저장(권장):
-
-  * `dataset/prepdata/{version}/common/train_manifest.parquet`
-  * `dataset/prepdata/{version}/common/valid_manifest.parquet`
-
-#### Prepdata 생성: `task_format.yaml` 준수
-
-* `task_format.yaml.supported_tasks[{task_type}]`의 `split_layout`과 `index_schema`를 준수하여 생성한다.
-
-  * `dataset/prepdata/{version}/stats.json`
-  * `dataset/prepdata/{version}/train/`
-  * `dataset/prepdata/{version}/valid/`
-  * `dataset/prepdata/{version}/common/`
+    * `dataset/prepdata/{dataset_id}/stats.json`
+    * `dataset/prepdata/{dataset_id}/train/`
+    * `dataset/prepdata/{dataset_id}/valid/`
+    * `dataset/prepdata/{dataset_id}/common/`
 
 작업 (테스트):
 
@@ -196,7 +215,7 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 * split 전략별 추가 검사:
 
   * `group`: 그룹 누수 없음
-  * `stratified`: PASS/FAIL은 강제하지 않으며, 분포 요약만 리포트에 기록한다.
+  * `stratified`: 분포 요약만 리포트에 기록한다.
 * 필수 파일/폴더 검사:
 
   * `stats.json`, `train/`, `valid/`, `common/`
@@ -204,13 +223,13 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 
 결과(필수):
 
-* 데이터 파이프라인 코드: `01_data_pipeline.py`
-* `dataset/prepdata/{version}/stats.json`
-* `dataset/prepdata/{version}/train/`
-* `dataset/prepdata/{version}/valid/`
-* `dataset/prepdata/{version}/common/`
-* (권장) `dataset/prepdata/{version}/common/df_meta.parquet`
-* (권장) `dataset/prepdata/{version}/_tests/pipeline_test_report.md`
+* 데이터 파이프라인 코드: `./01_data_pipeline.py`
+* `dataset/prepdata/{dataset_id}/stats.json`
+* `dataset/prepdata/{dataset_id}/train/`
+* `dataset/prepdata/{dataset_id}/valid/`
+* `dataset/prepdata/{dataset_id}/common/`
+* (권장) `dataset/prepdata/{dataset_id}/common/df_meta.parquet`
+* (권장) `dataset/prepdata/{dataset_id}/_tests/pipeline_test_report.md`
 
 ---
 
@@ -218,15 +237,16 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 
 역할:
 
-* `02_train_baseline.py`를 작성하되, 디버그/스모크 테스트 목적으로 최소 샘플(train/valid 각 100개)만으로 학습/검증이 정상 동작하는지 확인한다.
+* `./02_train_baseline.py`를 작성하되, 디버그/스모크 테스트 목적으로 최소 샘플(train/valid 각 100개)만으로 학습/검증이 정상 동작하는지 확인한다.
 * 이 단계는 코드 작성과 스모크 테스트 통과가 완료되어야 다음 단계로 진행한다.
-
+* 단, `02_train_baseline.py` 스크립트가 존재하면:
+  * 해당 스크립트와 `Models/Artifacts/Baseline/...` 폴더를 삭제 후 진행한다.
 입력:
 
 * `user_defined_rules.json` (최우선)
 
   * `seed` (없으면 42)
-  * `dataset_config.dataset_id`  → `{version}` 및 `DATASET_ID`
+  * `dataset_config.dataset_id`
   * `dataset_config.task_type`
   * `baseline_smoke_test.epoch` (선택, 없으면 1)
   * `baseline_smoke_test.train_samples` (없으면 100)
@@ -235,27 +255,34 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
   * `baseline_smoke_test.max_batch_size` (선택)
   * (선택) `training_config.*`, `model_config.*`
 * `task_format.yaml` (필수)
-* `dataset/prepdata/{version}/train/`
-* `dataset/prepdata/{version}/valid/`
-* `dataset/prepdata/{version}/common/` (태스크에 따라 선택)
+* `dataset/prepdata/{dataset_id}/train/`
+* `dataset/prepdata/{dataset_id}/valid/`
+* `dataset/prepdata/{dataset_id}/common/` (태스크에 따라 선택)
 
 작업 (코드 작성):
 
 #### 베이스라인 학습 스크립트 생성
 
-* `02_train_baseline.py`를 작성한다.
-* `02_train_baseline.py`에는 전역 변수 `DATASET_ID: str`를 반드시 포함하고, `{version}`(= `dataset_config.dataset_id`)과 동일해야 한다.
-* 데이터 로딩은 `dataset/prepdata/{version}` 구조를 단일 진실 소스로 사용하며, `task_format.yaml.supported_tasks[{task_type}]`의 구조/스키마를 준수한다.
+* `./02_train_baseline.py`를 작성한다.
+* `./02_train_baseline.py`에는 전역 변수 `DATASET_ID: str`를 반드시 포함하고, `{dataset_id}`(= `dataset_config.dataset_id`)과 동일해야 한다.
+* 데이터 로딩은 `dataset/prepdata/{dataset_id}` 구조를 단일 진실 소스로 사용하며, `task_format.yaml.supported_tasks[{task_type}]`의 구조/스키마를 준수한다.
 * 스모크 테스트 샘플 선택(Subset)은 `seed` 기반으로 재현 가능해야 한다.
-* 최소 아티팩트/로그 구조를 갖춘다.
 
-  * `Models/Artifacts/baseline/spec.json`
-  * `Models/Artifacts/baseline/additional_assets/`
-  * `Models/Artifacts/baseline/logs/version_0/{metrics.csv,hparams.yaml}`
-* 스모크 테스트 모드를 지원한다.
+#### 베이스라인 아티팩트/로그 구조 (MUST)
 
-  * train/valid에서 각각 N/M개(기본 100개)만 샘플링
-  * `baseline_smoke_test.epoch`(기본 1)로 정상 동작만 검증
+* 스모크 테스트라도 **반드시** 아래 고정 구조로 산출물을 생성한다.
+
+  * `Models/Artifacts/Baseline/spec.json`
+  * `Models/Artifacts/Baseline/additional_assets/`
+  * `Models/Artifacts/Baseline/best.ckpt`
+  * `Models/Artifacts/Baseline/last.ckpt`
+  * `Models/Artifacts/Baseline/logs/version_0/{metrics.csv,hparams.yaml}`
+  * `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`
+
+* progressive-training에서 baseline을 출발점으로 run을 생성할 때,
+
+  * 베이스라인 스크립트는 `./02_train_baseline.py`를 복사하여 `./Runs/{run_id}/02_train_v###.py`로 사용한다.
+  * 베이스라인 아티팩트는 그대로 `Models/Artifacts/Baseline/`에서 참조한다.
 
 작업 (최적 배치 사이즈 탐색):
 
@@ -272,9 +299,12 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 
 작업 (expected_* 검증):
 
-* `user_defined_rules.json.model_config`에서 `expected_` 접두사를 가진 모든 키를 검증 대상(contract)으로 취급한다.
+* `user_defined_rules.model_config`에서 `expected_` 접두사를 가진 모든 키를 검증 대상(contract)으로 취급한다.
+
   * 예: `expected_stride`, `expected_channels`, `expected_out_shape`, `expected_dtype` …
+
 * 관측은 (가능하면) dummy forward 1회로 산출한다. (batch=1, minimal input)
+
 * minimal input은 model_config의 입력 제약(H_TARGET, W_BUCKETS 등)을 만족하도록 구성한다.
 
 * 검증 방식(MUST):
@@ -282,7 +312,9 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
   1. `model_config`에서 `expected_`로 시작하는 항목들을 모두 수집해 `expected_map`을 만든다.
   2. `expected_map`이 비어있으면 본 검증 단계는 **SKIP** 한다(FAIL 아님).
   3. 현재 학습 코드가 생성/로딩한 “검증 가능한 실제 값”을 `observed_map`으로 만든다.
+
      * `observed_map`은 `expected_*`의 suffix와 동일한 이름을 사용한다.
+
        * 예: `expected_stride` ↔ `observed_stride`, `expected_channels` ↔ `observed_channels`
   4. 각 `expected_*`에 대해 PASS/FAIL을 결정한다(아래 타입 규칙 적용).
 
@@ -305,7 +337,7 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 
 * 리포트 기록(MUST):
 
-  * 아래 내용을 `Models/Artifacts/baseline/_tests/baseline_smoke_test_report.md`에 포함한다.
+  * 아래 내용을 `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`에 포함한다.
 
     * `expected_map`
     * `observed_map`
@@ -325,34 +357,29 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 
 #### 학습 실패(에러/예외) 처리 규칙
 
-  * `02_train_baseline.py` 실행 중 예외가 발생하면, 해당 버전의 아티팩트 디렉토리를 **초기화(삭제 후 재생성)** 한다.
-    * 대상: `Models/Artifacts/baseline/` 전체
-  * 초기화 후, 에러 로그/스택트레이스를 근거로 원인을 요약하고, 해결을 위한 **코드 수정**을 수행한다.
-    * 수정 대상: `02_train_baseline.py` (필요 시 해당 스크립트가 import하는 로컬 모듈 포함)
-    * 사용자 정의 제약(`user_defined_rules.json`, `user_instruction.md`)은 항상 우선하며, 제약을 우회하는 수정은 금지한다.
-  * 수정이 완료되면 **동일 버전(baseline)** 으로 학습을 다시 실행한다.
-  * (권장) 재시도 이력을 아래 파일에 포함시킨다.
-    * `Models/Artifacts/baseline/_tests/baseline_smoke_test_report.md`
-      * 최소 포함: `attempt`, `error_summary`, `root_cause_hypothesis`, `code_change_summary`, `status(PASS/FAIL)`
+* `./02_train_baseline.py` 실행 중 예외가 발생하면, 해당 베이스라인 아티팩트 디렉토리를 **초기화(삭제 후 재생성)** 한다.
 
-#### 아티팩트 저장
+  * 대상: `Models/Artifacts/Baseline/` 전체
+* 초기화 후, 에러 로그/스택트레이스를 근거로 원인을 요약하고, 해결을 위한 **코드 수정**을 수행한다.
 
-* 스모크 러닝이라도 **반드시** 아래 파일을 생성해야 한다.
+  * 수정 대상: `./02_train_baseline.py` (필요 시 해당 스크립트가 import하는 로컬 모듈 포함)
+  * 사용자 정의 제약(`user_defined_rules.json`, `user_instruction.md`)은 항상 우선하며, 제약을 우회하는 수정은 금지한다.
+* 수정이 완료되면 **동일 베이스라인(Baseline)** 으로 학습을 다시 실행한다.
+* (권장) 재시도 이력을 아래 파일에 포함시킨다.
 
-  * `Models/Artifacts/baseline/best.ckpt`
-  * `Models/Artifacts/baseline/last.ckpt`
-* `best.ckpt` 선정 기준(권장): valid_loss 기준으로 best 저장. (loss 기반이어도 무방하나 `spec.json`에 기준을 명시)
-* 체크포인트 저장이 불가능한 태스크/프레임워크라면, 실행을 중단하고 대체 규칙을 문서화해야 한다(임의로 생략 금지).
+  * `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`
+
+    * 최소 포함: `attempt`, `error_summary`, `root_cause_hypothesis`, `code_change_summary`, `status(PASS/FAIL)`
 
 결과(필수):
 
-* `02_train_baseline.py`
-* `Models/Artifacts/baseline/spec.json`
-* `Models/Artifacts/baseline/best.ckpt`
-* `Models/Artifacts/baseline/last.ckpt`
-* `Models/Artifacts/baseline/additional_assets/`
-* `Models/Artifacts/baseline/logs/version_0/{metrics.csv,hparams.yaml}`
-* `Models/Artifacts/baseline/_tests/baseline_smoke_test_report.md`
+* `./02_train_baseline.py`
+* `Models/Artifacts/Baseline/spec.json`
+* `Models/Artifacts/Baseline/best.ckpt`
+* `Models/Artifacts/Baseline/last.ckpt`
+* `Models/Artifacts/Baseline/additional_assets/`
+* `Models/Artifacts/Baseline/logs/version_0/{metrics.csv,hparams.yaml}`
+* `Models/Artifacts/Baseline/_tests/baseline_smoke_test_report.md`
 
 ---
 
@@ -363,6 +390,13 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 * Step 0~2 산출물이 모두 존재하고 테스트가 통과했는지 최종 점검한다.
 * 최종 점검이 통과되면 다음 단계로 **`progressive-training`** 스킬을 트리거한다.
 
+  * progressive-training은 실행 시 run_id를 생성하고(`YYYY-MM-DD_HH-MM`),
+
+    * 버전 스크립트: `./Runs/{run_id}/02_train_v###.py`
+    * 버전 아티팩트: `Models/Runs/{run_id}/Artifacts/v###/...`
+    * 리포트: `Models/Runs/{run_id}/Report/...`
+      를 사용한다.
+
 입력:
 
 * Step 0~2 산출물 전체
@@ -372,17 +406,21 @@ description: 원천 데이터를 자동으로 탐색해 샘플 단위와 라벨/
 * 체크리스트로 최종 검증한다.
 
   * `dataset/rawdata/profiling.md` 존재 및 source별 PASS 기록
-  * `dataset/prepdata/{version}/` 내 `stats.json, train/, valid/, common/` 존재
+  * `dataset/prepdata/{dataset_id}/` 내 `stats.json, train/, valid/, common/` 존재
   * Step 1 테스트 통과(리포트가 있으면 PASS 확인)
-  * `02_train_baseline.py` 존재
-  * `Models/Artifacts/baseline/` 내 `best.ckpt, last.ckpt, spec.json, logs/, additional_assets/, _tests/baseline_smoke_test_report.md` 존재
+  * `./02_train_baseline.py` 존재
+  * `Models/Artifacts/Baseline/` 내 `best.ckpt, last.ckpt, spec.json, logs/, additional_assets/, _tests/baseline_smoke_test_report.md` 존재
   * Step 2 스모크 테스트 통과(리포트가 있으면 PASS 확인)
 
 결과:
 
 * 최종 점검 통과 시:
-  * **`.claude/skills/progressive-training/SKILL.md`** 파일을 읽고 작업한 dataset_id를 전달하여 후속 작업을 이어서 진행
+
+  * Todo/Todos 항목 초기화
+  * **`.claude/skills/progressive-training/SKILL.md`** 스킬 파일을 읽고 `progressive-training` 작업을 이어서 진행
+  * 본 스킬에서 사용한 dataset_id를 `progressive-training`에 그대로 전달하여 사용
 * 최종 점검 실패 시:
+
   * 실패 원인을 상세히 작성하고 작업을 마무리
 
 ---
@@ -406,9 +444,14 @@ dataset/
         │   └── valid_manifest.parquet
         └── _tests/
             └── pipeline_test_report.md
+
+./
+├── 01_data_pipeline.py
+└── 02_train_baseline.py
+
 Models/
 └── Artifacts/
-    └── baseline/
+    └── Baseline/
         ├── spec.json
         ├── additional_assets/
         ├── best.ckpt
@@ -431,14 +474,14 @@ Models/
 * 프로파일링 단계의 스캔/로드 상한은 `user_defined_rules.dataset_config.max_profile_samples`로 제어한다.
 * 학습 데이터 구성 시 샘플 수 상한은 `user_defined_rules.dataset_config.max_train_samples`로 제어하며, 이는 전처리/검증을 통과한 학습 가능 샘플 풀에서 적용한다.
 * `task_format.yaml`이 없으면 실행하지 않는다.
-* Step 0는 `dataset/rawdata/`의 모든 source 폴더를 자동 탐색하여 `dataset/rawdata/profiling.md`를 작성한다.
+* Step 0는 `dataset/rawdata/`의 모든 source 폴더를 자동 탐색하여 `dataset/rawdata/profiling.md`를 작성한다. (단, profiling.md가 이미 존재하면 건너뜀)
 * Step 1은 반드시 `dataset/rawdata/profiling.md`를 읽고 그 규칙에 따라 rawdata를 파싱한다.
-* Step 2는 `02_train_baseline.py`를 생성하고 스모크 테스트를 통과해야 한다.
+* Step 2는 `./02_train_baseline.py`를 생성하고 스모크 테스트를 통과해야 한다.
 * Step 2는 **`best.ckpt`, `last.ckpt`를 반드시 생성**해야 한다.
+* 베이스라인 아티팩트 경로는 반드시 `Models/Artifacts/Baseline/`을 사용한다.
 * Step 3 최종 검사에서 모든 조건이 충족되어야 ready로 간주한다.
 
 ### SHOULD
 
 * `df_meta.parquet`와 split 매니페스트(train/valid)를 `common/`에 저장해 데이터 관리/재현성을 높인다.
-* `stratified` split은 분포 유지 검증과 허용 오차 기준을 문서화한다.
 * Step 0~2 테스트 리포트를 `_tests/` 하위에 남겨 검증 기록으로 유지한다.
