@@ -1,20 +1,25 @@
 {
   "seed": 42,
   "loop_config": {
-    "max_versions": 10
+    "max_versions": 5
   },
   "dataset_config": {
     "dataset_id": "v1"
   },
   "training_config": {
     "num_gpus": 1,
-    "epochs": 20,
+    "epochs": 3,
     "eval_step": "every_epoch",
-    "loss_function": "logloss"
+    "loss_function": "CTC"
   },
   "eval_config": {
     "primary_metric": "loss",
-    "metrics": ["loss", "accuracy"],
+    "metrics": [
+      {"name": "loss", "higher_is_better": false},
+      {"name": "wer", "higher_is_better": false},
+      {"name": "cer", "higher_is_better": false},
+      {"name": "exact_match", "higher_is_better": true}
+    ],
     "infer_samples": 10
   }
 }

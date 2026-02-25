@@ -2,18 +2,23 @@
   "seed": 42,
   "dataset_config": {
     "prepdata_version": "v1",
-    "task_type": "image-classification",
+    "task_type": "ocr-recognition",
     "valid_ratio": 0.1,
     "split_strategy": "uniform",
     "stratify_key": "category",
-    "max_profile_samples": 1000,
-    "max_train_samples": 10000
+    "max_profile_samples": 100,
+    "max_train_samples": 1000
   },
   "model_config": {
-    "IMG_SIZE": [384, 384],
-    "vision_backbone": "efficientnetv2",
+    "H_TARGET": 64,
+    "W_BUCKETS": [256, 384, 512],
+    "MAX_TOKENS": 64,
+    "vision_backbone": "tf_efficientnetv2_s.in21k_ft_in1k",
     "vision_pretrained": true,
-    "expected_pooled_output_dim": 1280
+    "vision_backbone_out_indices": [1],
+    "expected_stride": 4,
+    "expected_channels": 48,
+    "expected_allow_missing_keys": false
   },
   "baseline_smoke_test": {
     "num_gpus": 1,

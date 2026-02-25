@@ -50,6 +50,128 @@ Claude를 자율 코딩 에이전트로 사용하여 원천 데이터 탐색부�
 
 ---
 
+## 설치 및 사용
+
+### 1. Claude 프로젝트에 스킬 추가
+
+스킬 파일을 Claude 프로젝트의 스킬 디렉토리에 복사합니다. 권장 경로는 `.claude/skills/`입니다.
+
+```
+.claude/
+└── skills/
+    ├── build-baseline/
+    │   ├── SKILL.md
+    │   ├── task_format.yaml          ← 필수
+    │   ├── user_defined_rules.json   ← 선택
+    │   └── user_instruction.md       ← 선택
+    └── progressive-training/
+        ├── SKILL.md
+        ├── user_defined_rules.json   ← 선택
+        └── user_instruction.md       ← 선택
+```
+
+> **참고:** `task_format.yaml`은 `build-baseline`에만 필요합니다. 파일이 없으면 스킬이 즉시 중단됩니다.
+
+### 2-1. `build-baseline`용 `user_defined_rules.json` 설정
+
+```json
+{
+  "seed": 42,
+  "dataset_config": {
+    "prepdata_version": "v1",
+    "task_type": "ocr-recognition",
+    "valid_ratio": 0.1,
+    "split_strategy": "uniform",
+    "stratify_key": "category",
+    "max_profile_samples": 100,
+    "max_train_samples": 1000
+  },
+  "model_config": {
+    "H_TARGET": 64,
+    "W_BUCKETS": [256, 384, 512],
+    "MAX_TOKENS": 64,
+    "vision_backbone": "tf_efficientnetv2_s.in21k_ft_in1k",
+    "vision_pretrained": true,
+    "vision_backbone_out_indices": [1],
+    "expected_stride": 4,
+    "expected_channels": 48,
+    "expected_allow_missing_keys": false
+  },
+  "baseline_smoke_test": {
+    "num_gpus": 1,
+    "epoch": 1,
+    "train_samples": 100,
+    "valid_samples": 100,
+    "min_batch_size": 4,
+    "max_batch_size": 32
+  }
+}
+```
+
+### 2-2. `progressive-training`용 `user_defined_rules.json` 설정
+
+```json
+{
+  "seed": 42,
+  "loop_config": {
+    "max_versions": 5
+  },
+  "dataset_config": {
+    "dataset_id": "v1"
+  },
+  "training_config": {
+    "num_gpus": 1,
+    "epochs": 3,
+    "eval_step": "every_epoch",
+    "loss_function": "CTC"
+  },
+  "eval_config": {
+    "primary_metric": "loss",
+    "metrics": [
+      {"name": "loss", "higher_is_better": false},
+      {"name": "wer", "higher_is_better": false},
+      {"name": "cer", "higher_is_better": false},
+      {"name": "exact_match", "higher_is_better": true}
+    ],
+    "infer_samples": 10
+  }
+}
+```
+
+### 3. `user_instruction.md` 설정
+
+자유 형식의 마크다운 파일로, `user_defined_rules.json`으로 표현하기 어려운 자연어 지시사항을 작성합니다. 두 스킬 모두 실행 시 이 파일을 최우선으로 읽고, 명시된 내용을 사용자 정의 제약으로 간주하여 전 과정에서 준수합니다.
+
+```markdown
+## User Instruction
+- 패키지 관리는 uv를 활용하세요.
+- 이미지 처리에는 pillow 라이브러리를 활용하세요.
+- 모델 저장 시 safetensors 포맷을 사용하세요.
+- 로깅은 wandb 대신 tensorboard를 사용하세요.
+```
+
+`user_defined_rules.json`과 `user_instruction.md` 모두 `SKILL.md`와 동일한 디렉토리에 위치해야 합니다. 두 파일이 없으면 사용자 정의 제약이 없는 것으로 간주합니다.
+
+---
+
+### 4. 실행
+
+원천 데이터를 `dataset/rawdata/` 아래에 배치한 뒤 Claude에서 입력합니다.
+
+```
+/build-baseline
+```
+
+Claude가 전체 파이프라인을 자율적으로 실행합니다. `build-baseline`이 완료되면 `progressive-training`이 자동으로 시작됩니다.
+
+베이스라인이 이미 존재하는 경우 `progressive-training`을 단독으로 실행할 수도 있습니다.
+
+```
+/progressive-training
+```
+
+---
+
 ## 스킬 상세
 
 ### 1. `build-baseline`
@@ -135,86 +257,6 @@ your-project/
             ├── final-analysis.md
             └── Artifacts/
                 └── v{best}/
-```
-
----
-
-## 설치 및 사용
-
-### 1. Claude 프로젝트에 스킬 추가
-
-스킬 파일을 Claude 프로젝트의 스킬 디렉토리에 복사합니다. 권장 경로는 `.claude/skills/`입니다.
-
-```
-.claude/
-└── skills/
-    ├── build-baseline/
-    │   ├── SKILL.md
-    │   ├── task_format.yaml          ← 필수
-    │   ├── user_defined_rules.json   ← 선택
-    │   └── user_instruction.md       ← 선택
-    └── progressive-training/
-        ├── SKILL.md
-        ├── user_defined_rules.json   ← 선택
-        └── user_instruction.md       ← 선택
-```
-
-> **참고:** `task_format.yaml`은 `build-baseline`에만 필요합니다. 파일이 없으면 스킬이 즉시 중단됩니다.
-
-### 2. `user_defined_rules.json` 설정
-
-```json
-{
-  "seed": 42,
-  "dataset_config": {
-    "dataset_id": "v1",
-    "task_type": "image-classification",
-    "valid_ratio": 0.1,
-    "split_strategy": "stratified",
-    "stratify_key": "category",
-    "max_profile_samples": 1000,
-    "max_train_samples": 10000
-  },
-  "model_config": {
-    "vision_backbone": "efficientnetv2",
-    "expected_pooled_output_dim": 1280
-  },
-  "baseline_smoke_test": {
-    "epoch": 1,
-    "train_samples": 100,
-    "valid_samples": 100,
-    "min_batch_size": 4,
-    "max_batch_size": 128
-  },
-  "training_config": {
-    "epochs": 10,
-    "batch_size": 32
-  },
-  "eval_config": {
-    "primary_metric": "accuracy",
-    "metrics": ["accuracy", "loss"],
-    "infer_samples": 10
-  },
-  "loop_config": {
-    "max_versions": 10
-  }
-}
-```
-
-### 3. 실행
-
-원천 데이터를 `dataset/rawdata/` 아래에 배치한 뒤 Claude에서 입력합니다.
-
-```
-/build-baseline
-```
-
-Claude가 전체 파이프라인을 자율적으로 실행합니다. `build-baseline`이 완료되면 `progressive-training`이 자동으로 시작됩니다.
-
-베이스라인이 이미 존재하는 경우 `progressive-training`을 단독으로 실행할 수도 있습니다.
-
-```
-/progressive-training
 ```
 
 ---

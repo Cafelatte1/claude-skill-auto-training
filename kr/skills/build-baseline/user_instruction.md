@@ -1,4 +1,11 @@
 ## User Instruction
 - 패지키 관리는 uv를 활용하세요.
 - 이미지 처리에는 pillow 라이브러리를 활용하세요.
-...
+- 데이터가 zip 파일인 경우, 디스크에 전체를 풀지 말고 zip 내부 파일을 직접 열어(부분 추출/스트리밍) 사용하세요.
+- resize 함수의 경우, 추론 시에도 동일하게 활용할 수 있도록 구현하세요.
+- Height를 기준으로 비율 유지 resize하고, W_BUCKETS에 따른 bucket padding은 해놓지마세요. (메모리 낭비 + training time에 padding을 적용할 것)
+- CUA의 데이터셋의 경우 'Information Display' 카테고리만 활용하세요. (나머지 카테고리는 text-recognition 용도가 아님)
+- 병렬처리 라이브러리를 활용하거나 옵션을 사용할 경우 worker수는 4로 설정해 작업하세요.
+- 다음 샘플은 제외하세요.
+    - 앞뒤 공백은 제외 label text 길이 최소 2자 미만, 128자 초과
+    - resize 후 W_BUCKETS의 최대값을 초과하는 이미지
