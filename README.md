@@ -201,7 +201,23 @@ your-project/
 }
 ```
 
-### 3. 실행
+### 3. `user_instruction.md` 설정
+
+자유 형식의 마크다운 파일로, `user_defined_rules.json`으로 표현하기 어려운 자연어 지시사항을 작성합니다. 두 스킬 모두 실행 시 이 파일을 최우선으로 읽고, 명시된 내용을 사용자 정의 제약으로 간주하여 전 과정에서 준수합니다.
+
+```markdown
+## User Instruction
+- 패키지 관리는 uv를 활용하세요.
+- 이미지 처리에는 pillow 라이브러리를 활용하세요.
+- 모델 저장 시 safetensors 포맷을 사용하세요.
+- 로깅은 wandb 대신 tensorboard를 사용하세요.
+```
+
+`user_defined_rules.json`과 `user_instruction.md` 모두 `SKILL.md`와 동일한 디렉토리에 위치해야 합니다. 두 파일이 없으면 사용자 정의 제약이 없는 것으로 간주합니다.
+
+---
+
+### 4. 실행
 
 원천 데이터를 `dataset/rawdata/` 아래에 배치한 뒤 Claude에서 입력합니다.
 
